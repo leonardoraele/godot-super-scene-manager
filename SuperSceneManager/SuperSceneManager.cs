@@ -73,6 +73,7 @@ public partial class SuperSceneManager : Node
 			return;
 		}
 		Instance = this;
+		this.SceneStack.Push(new() { sceneName = MAIN_SCENE });
 	}
     public override void _ExitTree()
     {
@@ -84,7 +85,6 @@ public partial class SuperSceneManager : Node
     public override void _Ready()
     {
         base._Ready();
-		this.SceneStack.Push(new() { sceneName = MAIN_SCENE });
 		this.AddChild(this.AsyncTaskHelper);
 		this.SetupTransitionScene();
     }
