@@ -112,7 +112,9 @@ public partial class AsyncTaskHelper : Node
         string typeHint = typeof(R).ToString();
 		ResourceLoader.LoadThreadedRequest(path, typeHint, useSubThreads, cacheMode);
 		TaskCompletionSource<R> source = new();
-		this.OngoingResourceLoads[path] = source as TaskCompletionSource<Resource>; // TODO // FIXME
+#pragma warning disable CS8601 // Possible null assignment.
+		this.OngoingResourceLoads[path] = source as TaskCompletionSource<Resource>;
+#pragma warning restore CS8601
 		return source.Task;
 	}
 
