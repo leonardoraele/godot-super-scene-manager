@@ -2,7 +2,7 @@ using System;
 using System.Threading.Tasks;
 using Godot;
 using static Godot.Node;
-using static Raele.SuperSceneManager.SuperSceneManager;
+using static Raele.SuperSceneManager.SceneManager;
 
 namespace Raele.SuperSceneManager;
 

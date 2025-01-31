@@ -3,22 +3,23 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Godot;
+using Raele.CSLogger;
 
 namespace Raele.SuperSceneManager;
 
-public partial class SuperSceneManager : Node
+public partial class SceneManager : Node
 {
 	// -----------------------------------------------------------------------------------------------------------------
 	// STATICS
 	// -----------------------------------------------------------------------------------------------------------------
 
-    public const string SETTING_SCENE_LIST = "addons/super_scene_manager/scene_list";
-    public const string SETTING_TRANSITION_SCENE = "addons/super_scene_manager/transition_scene";
-    // public const string SETTING_EXITING_SCENE_BEHAVIOR = "addons/super_scene_manager/exiting_scene_behavior";
+	public const string SETTING_SCENE_LIST = "addons/super_scene_manager/scene_list";
+	public const string SETTING_TRANSITION_SCENE = "addons/super_scene_manager/transition_scene";
+	// public const string SETTING_EXITING_SCENE_BEHAVIOR = "addons/super_scene_manager/exiting_scene_behavior";
 	// public const string SETTING_ENTERING_SCENE_BEHAVIOR = "addons/super_scene_manager/entering_scene_behavior";
 	public const string INITIAL_SCENE = "__initial_scene__";
 
-    public static SuperSceneManager Instance { get; private set; } = null!;
+	public static SceneManager Instance { get; private set; } = null!;
 	private static readonly IReadOnlyDictionary<string, string> AllRegisteredScenes
 		= ProjectSettings.GetSetting(SETTING_SCENE_LIST).AsGodotDictionary<string, string>();
 
@@ -32,22 +33,23 @@ public partial class SuperSceneManager : Node
 	// FIELDS
 	// -----------------------------------------------------------------------------------------------------------------
 
-    public bool TransitionInProgress { get; private set; } = false;
-    private Stack<SceneHistoryItem> _sceneStack = new();
+	public bool TransitionInProgress { get; private set; } = false;
+	private Stack<SceneHistoryItem> _sceneStack = new();
 	private TaskCompletionSource? TransitionPauseController;
+	private Logger Logger = new Logger(nameof(SuperSceneManager));
 
-    // -----------------------------------------------------------------------------------------------------------------
-    // PROPERTIES
-    // -----------------------------------------------------------------------------------------------------------------
+	// -----------------------------------------------------------------------------------------------------------------
+	// PROPERTIES
+	// -----------------------------------------------------------------------------------------------------------------
 
 	public IReadOnlyList<SceneHistoryItem> GetHistory() => this._sceneStack.ToArray();
 	public SceneHistoryItem PeekHistory() => this._sceneStack.Peek();
 
-    // -----------------------------------------------------------------------------------------------------------------
-    // SIGNALS
-    // -----------------------------------------------------------------------------------------------------------------
+	// -----------------------------------------------------------------------------------------------------------------
+	// SIGNALS
+	// -----------------------------------------------------------------------------------------------------------------
 
-    [Signal] public delegate void BeforeSceneExitEventHandler(Node scene);
+	[Signal] public delegate void BeforeSceneExitEventHandler(Node scene);
 	[Signal] public delegate void AfterSceneExitEventHandler();
 	[Signal] public delegate void SceneLoadProgressEventHandler(Variant percentage, string toScene, string fromScene);
 	[Signal] public delegate void BeforeSceneEnterEventHandler(string sceneName, Node scene, Godot.Collections.Array @params);
@@ -58,7 +60,7 @@ public partial class SuperSceneManager : Node
 	// -----------------------------------------------------------------------------------------------------------------
 
 	public record SceneChangeOptions {
-		public ExitModeEnum ExitMode = ExitModeEnum.Delete;
+		public SceneExitStrategyEnum ExitStrategy = SceneExitStrategyEnum.Delete;
 		// TODO
 		// public NodePath DeploymentParent = new NodePath("/root");
 		public Variant[] Args = [];
@@ -71,10 +73,14 @@ public partial class SuperSceneManager : Node
 	/// Scenes should be able to determine their own default behavior, but programmers should also be able to
 	/// override the default behavior on a per-scene-change-call basis.
 	/// </summary>
-	public enum ExitModeEnum {
+	public enum SceneExitStrategyEnum {
 		/// <summary>
 		/// The old scene is removed from the tree and deleted. This is analogous to the behavior of
 		/// SceneTree.change_scene_to_file() and Node.queue_free(); and is the default behavior.
+		///
+		/// ⚠ Do not use this strategy when pushing a scene with <see cref="PushSceneWithReturn"/>, or the previous
+		/// scene might be kept in memory until the new scene ends. Also, the node will still be deleted, and the
+		/// in-memory node will be invalidated, which might cause issues.
 		/// </summary>
 		Delete,
 		/// <summary>
@@ -94,15 +100,64 @@ public partial class SuperSceneManager : Node
 		/// </summary>
 		Hide,
 		/// <summary>
+		/// The old scene is kept in the tree but its processing is disabled. It will still be visible, but a canvas
+		/// layer is placed in front of it with a grayed out texture to contrast visually with the new scene, indicating
+		/// that it is disabled.
+		/// </summary>
+		DisableAndTint,
+		/// <summary>
 		/// The old scene is kept in the tree but its processing is disabled. It will still be visible.
 		/// </summary>
 		Disable,
+		/// <summary>
+		/// A canvas layer is placed in front of it with a grayed out texture to contrast visually with the new scene.
+		/// The old scene is kept visible and processing in parallel to the new scene, albeit with a tint, and it ceases
+		/// to be the SceneTree.current_scene.
+		/// </summary>
+		Tint,
 		/// <summary>
 		/// Nothing is done to the existing scene, other than making SceneTree.current_scene point to the new scene. The
 		/// old scene will be kept in the tree, visible and processing, in parallel to the new scene.
 		/// </summary>
 		Nothing,
 	}
+
+	// public enum PopUpType {
+	// 	/// <summary>
+	// 	/// A box with the "ℹ" icon, a title, an optional message, and an OK button.
+	// 	/// </summary>
+	// 	Info,
+
+	// 	/// <summary>
+	// 	/// A box with the "⚠" icon, a title, an optional  message, and an OK button.
+	// 	/// </summary>
+	// 	Warn,
+
+	// 	/// <summary>
+	// 	/// A box with the "⛔" icon, a title, an optional message, and an OK button.
+	// 	/// </summary>
+	// 	Error,
+
+	// 	/// <summary>
+	// 	/// A box with a question mark icon, a title, an optional message, and OK and Cancel buttons.
+	// 	/// </summary>
+	// 	Confirm,
+
+	// 	/// <summary>
+	// 	/// A box with the "⚠" icon, a title, an optional message, and OK and Cancel buttons.
+	// 	/// </summary>
+	// 	WarnConfirm,
+
+	// 	/// <summary>
+	// 	/// A box with a question mark icon, a title, an optional message, and Yes and No buttons.
+	// 	/// </summary>
+	// 	Query,
+
+	// 	// /// <summary>
+	// 	// /// A box with a question mark icon, a title, an optional message, and some buttons with custom labels.
+	// 	// /// </summary>
+	// 	// Options,
+	// }
 
 	// TODO
 	// /// <summary>
@@ -154,38 +209,38 @@ public partial class SuperSceneManager : Node
 	public override void _EnterTree()
 	{
 		if (Instance != null) {
-			GD.PrintErr("SuperSceneManager: Instance already exists, ignoring autoload request.");
+			this.Logger.Error("Instance already exists, ignoring autoload request.");
 			this.QueueFree();
 			return;
 		}
 		Instance = this;
 		this._sceneStack.Push(new() { SceneName = INITIAL_SCENE });
 	}
-    public override void _ExitTree()
-    {
-        if (Instance == this) {
+	public override void _ExitTree()
+	{
+		if (Instance == this) {
 			Instance = null!;
 		}
-    }
+	}
 
-    public override void _Ready()
-    {
-        base._Ready();
+	public override void _Ready()
+	{
+		base._Ready();
 		this.SetupTransitionScene();
-    }
+	}
 
-    // public override void _Process(double delta)
-    // {
-    // 	base._Process(delta);
-    // }
+	// public override void _Process(double delta)
+	// {
+	// 	base._Process(delta);
+	// }
 
-    // public override void _PhysicsProcess(double delta)
-    // {
-    // 	base._PhysicsProcess(delta);
-    // }
+	// public override void _PhysicsProcess(double delta)
+	// {
+	// 	base._PhysicsProcess(delta);
+	// }
 
-    // public override string[] _GetConfigurationWarnings()
-    // 	=> base._PhysicsProcess(delta);
+	// public override string[] _GetConfigurationWarnings()
+	// 	=> base._PhysicsProcess(delta);
 
 	// -----------------------------------------------------------------------------------------------------------------
 	// SETUP METHODS
@@ -195,14 +250,14 @@ public partial class SuperSceneManager : Node
 	/// Loads the scene defined by the developer in the settings. This scene will be used when transitioning between
 	/// scenes. This is useful as a loading screen.
 	/// </summary>
-    private void SetupTransitionScene()
-    {
+	private void SetupTransitionScene()
+	{
 		if (!GodotUtil.TryGetSetting(SETTING_TRANSITION_SCENE, out string transitionScenePath) || string.IsNullOrEmpty(transitionScenePath)) {
 			return;
 		}
 		PackedScene transitionScene = ResourceLoader.Load<PackedScene>(transitionScenePath, nameof(PackedScene));
 		this.AddChild(transitionScene.Instantiate());
-    }
+	}
 
 	// -----------------------------------------------------------------------------------------------------------------
 	// SCENE LOANDING & CHANGING METHODS
@@ -227,57 +282,59 @@ public partial class SuperSceneManager : Node
 
 	private void ChangeSceneSync(string sceneName)
 	{
-		string scenePath = SuperSceneManager.GetScenePath(sceneName);
+		string scenePath = SceneManager.GetScenePath(sceneName);
 		this.GetTree().ChangeSceneToFile(scenePath);
 	}
 
 	private async Task ReturnToPreviousScene(SceneHistoryItem item)
 	{
-		await this.ExitCurrentScene(ExitModeEnum.Delete);
+		await this.ExitCurrentScene(SceneExitStrategyEnum.Delete);
 
 		if (item.PreviousSceneInstance != null) {
 			this.GetTree().CurrentScene = item.PreviousSceneInstance;
-			switch (item.Options.ExitMode) {
-				case ExitModeEnum.Detach:
+			switch (item.Options.ExitStrategy) {
+				case SceneExitStrategyEnum.Detach:
 					this.GetTree().Root.AddChild(item.PreviousSceneInstance);
 					break;
-				case ExitModeEnum.Hide:
+				case SceneExitStrategyEnum.Hide:
 					item.PreviousSceneInstance.Set("visible", true);
 					break;
-				case ExitModeEnum.Disable:
+				case SceneExitStrategyEnum.Disable:
 					item.PreviousSceneInstance.ProcessMode = item.ProcessMode;
 					break;
-				case ExitModeEnum.HideAndDisable:
+				case SceneExitStrategyEnum.HideAndDisable:
 					item.PreviousSceneInstance.Set("visible", true);
 					item.PreviousSceneInstance.ProcessMode = item.ProcessMode;
 					break;
 			}
 		} else {
-			this.ChangeSceneSync(this.PeekHistory().SceneName);
+			await this.ChangeSceneAsync(this.PeekHistory().SceneName);
 		}
 	}
 
-	private Task<Node> ChangeSceneAsync(string sceneName, SceneChangeOptions options)
-		=> this.ChangeSceneAsync<Node>(sceneName, options);
+	private Task<Node> ChangeSceneAsync(string sceneName, SceneChangeOptions? options = null)
+		=> this.ChangeSceneAsync<Node>(sceneName, options ?? default);
 
-    private async Task<T> ChangeSceneAsync<T>(string sceneName, SceneChangeOptions options) where T : Node {
+	private async Task<T> ChangeSceneAsync<T>(string sceneName, SceneChangeOptions? options = null) where T : Node {
 		if (this.TransitionInProgress) {
 			throw new Exception("SuperSceneManager: Transition already in progress.");
 		}
 		try {
 			this.TransitionInProgress = true;
-			return await this.PerformSceneChangeAsync<T>(sceneName, options);
+			return await this.PerformSceneChangeAsync<T>(sceneName, options ?? default);
 		} finally {
 			this.TransitionInProgress = false;
 		}
 	}
 
-	private async Task<T> PerformSceneChangeAsync<T>(string sceneName, SceneChangeOptions options) where T : Node {
+	private async Task<T> PerformSceneChangeAsync<T>(string sceneName, SceneChangeOptions? options = null) where T : Node {
+		options ??= new();
+
 		// Validate next scene
-		string scenePath = SuperSceneManager.GetScenePath(sceneName);
+		string scenePath = SceneManager.GetScenePath(sceneName);
 
 		// Exit current scene
-		await this.ExitCurrentScene(options.ExitMode);
+		await this.ExitCurrentScene(options.ExitStrategy);
 
 		// Load next scene
 		PackedScene scene = await ResourceLoadingUtil.LoadSceneAsync(
@@ -291,37 +348,41 @@ public partial class SuperSceneManager : Node
 		}
 
 		// Before entering next scene
-		await this.EmitSignalAsync(SignalName.BeforeSceneEnter, [sceneName, node, ..options.Args]);
-		if (instance.HasMethod("_before_enter_tree")) {
-			instance.Call("_before_enter_tree", options.Args);
+		await this.EmitSignalAsync(SignalName.BeforeSceneEnter, [sceneName, instance, ..options.Args]);
+		Variant maybeTask = instance.HasMethod("_before_enter_tree") ? instance.Call("_before_enter_tree", options.Args)
+			: instance.HasMethod("_BeforeEnterTree") ? instance.Call("_BeforeEnterTree", options.Args)
+			: new Variant();
+
+		if (maybeTask.VariantType == Variant.Type.Signal) {
+			await maybeTask.AsSignal();
 		}
 
 		// Enter next scene
 		this.GetTree().Root.AddChild(instance);
 		this.GetTree().CurrentScene = instance;
-		await this.EmitSignalAsync(SignalName.AfterSceneEnter, [sceneName, node, ..options.Args]);
+		await this.EmitSignalAsync(SignalName.AfterSceneEnter, [sceneName, instance, ..options.Args]);
 
 		return instance;
 	}
 
-	private async Task ExitCurrentScene(ExitModeEnum exitMode)
+	private async Task ExitCurrentScene(SceneExitStrategyEnum exitMode)
 	{
 		Node oldScene = this.GetTree().CurrentScene;
 		await this.EmitSignalAsync(SignalName.BeforeSceneExit, [oldScene]);
 		switch (exitMode) {
-			case ExitModeEnum.Delete:
+			case SceneExitStrategyEnum.Delete:
 				await this.FreeNodeAsync(oldScene);
 				break;
-			case ExitModeEnum.Detach:
+			case SceneExitStrategyEnum.Detach:
 				oldScene.GetParent().RemoveChild(oldScene);
 				break;
-			case ExitModeEnum.Hide:
+			case SceneExitStrategyEnum.Hide:
 				oldScene.Set("visible", false);
 				break;
-			case ExitModeEnum.Disable:
+			case SceneExitStrategyEnum.Disable:
 				oldScene.ProcessMode = ProcessModeEnum.Disabled;
 				break;
-			case ExitModeEnum.HideAndDisable:
+			case SceneExitStrategyEnum.HideAndDisable:
 				oldScene.Set("visible", false);
 				oldScene.ProcessMode = ProcessModeEnum.Disabled;
 				break;
@@ -357,19 +418,19 @@ public partial class SuperSceneManager : Node
 		this.TransitionPauseController = null;
 	}
 
-    // -----------------------------------------------------------------------------------------------------------------
-    // SCENE NAVIGATION METHODS
-    // -----------------------------------------------------------------------------------------------------------------
+	// -----------------------------------------------------------------------------------------------------------------
+	// SCENE NAVIGATION METHODS
+	// -----------------------------------------------------------------------------------------------------------------
 
 	private SceneHistoryItem PushHistoryItem(string sceneName, SceneChangeOptions options, bool hasTask = false)
 	{
 		SceneHistoryItem item = new() {
 			SceneName = sceneName,
 			Options = options,
-			PreviousSceneInstance = options.ExitMode != ExitModeEnum.Delete
+			PreviousSceneInstance = options.ExitStrategy != SceneExitStrategyEnum.Delete
 				? this.GetTree().CurrentScene
 				: null,
-			ProcessMode = options.ExitMode == ExitModeEnum.Disable || options.ExitMode == ExitModeEnum.HideAndDisable
+			ProcessMode = options.ExitStrategy == SceneExitStrategyEnum.Disable || options.ExitStrategy == SceneExitStrategyEnum.HideAndDisable
 				? this.GetTree().CurrentScene?.ProcessMode ?? ProcessModeEnum.Inherit
 				: ProcessModeEnum.Inherit,
 			TaskCompletionSource = hasTask ? new() : null,
@@ -378,18 +439,24 @@ public partial class SuperSceneManager : Node
 		return item;
 	}
 
-    public void PushScene(string sceneName, params Variant[] args)
+	public void PushScene(string sceneName, params Variant[] args)
+		=> this.PushScene(sceneName, new SceneChangeOptions() { Args = args });
+	public async void PushScene(string sceneName, SceneChangeOptions options)
 	{
-		this.PushHistoryItem(sceneName, new() { Args = args });
+		this.PushHistoryItem(sceneName, options);
 		try {
-			this.ChangeSceneSync(sceneName);
+			await this.ChangeSceneAsync(sceneName, options);
 		} catch {
 			this._sceneStack.Pop();
 			throw;
 		}
 	}
 
-	public async Task<T> PushSceneWithReturn<[MustBeVariant] T>(string sceneName, SceneChangeOptions? options = null)
+	public Task PushSceneWithReturn(string sceneName, params Variant[] args)
+		=> this.PushSceneWithReturn(sceneName, new SceneChangeOptions() { Args = args });
+	public Task<T> PushSceneWithReturn<[MustBeVariant] T>(string sceneName, params Variant[] args)
+		=> this.PushSceneWithReturn<T>(sceneName, new SceneChangeOptions() { Args = args });
+	public async Task<T> PushSceneWithReturn<[MustBeVariant] T>(string sceneName, SceneChangeOptions options)
 		=> (await this.PushSceneWithReturn(sceneName, options)).As<T>();
 
 	/// <summary>
@@ -397,10 +464,15 @@ public partial class SuperSceneManager : Node
 	/// passed to PopScene(). Note that if the current scene is deleted (when PreviousSceneActionEnum is Free), the
 	/// task will be resolved immediately with a result of Nil. This is to prevent memory leaks.
 	/// </summary>
-    public async Task<Variant> PushSceneWithReturn(string sceneName, SceneChangeOptions? options = null)
+	public async Task<Variant> PushSceneWithReturn(string sceneName, SceneChangeOptions options)
 	{
-		options ??= new();
-        SceneHistoryItem item = this.PushHistoryItem(sceneName, options, hasTask: true);
+		options ??= new() {
+			ExitStrategy = SceneExitStrategyEnum.HideAndDisable,
+		};
+		if (options.ExitStrategy == SceneExitStrategyEnum.Delete) {
+			this.Logger.Warn("Pushing a scene with return value using ExitStrategy.Delete. This is not recommended as it might cause issues since the node will be deleted from the engine but corresponding Godot.GodotObject objects refered by the stack awaiting the Task will be invalidated but not collected collected by GC.");
+		}
+		SceneHistoryItem item = this.PushHistoryItem(sceneName, options, hasTask: true);
 		try {
 			await this.ChangeSceneAsync(sceneName, options);
 		} catch {
@@ -412,12 +484,14 @@ public partial class SuperSceneManager : Node
 	}
 
 	public void ReplaceScene(string sceneName, params Variant[] args)
+		=> this.ReplaceScene(sceneName, new SceneChangeOptions() { Args = args });
+	public async void ReplaceScene(string sceneName, SceneChangeOptions options)
 	{
 		SceneHistoryItem item = this._sceneStack.Pop();
 		item.TaskCompletionSource?.SetException(new Exception("Scene was replaced."));
-		this.PushHistoryItem(sceneName, new() { Args = args });
+		this.PushHistoryItem(sceneName, options);
 		try {
-			this.ChangeSceneSync(sceneName);
+			await this.ChangeSceneAsync(sceneName, options);
 		} catch {
 			this._sceneStack.Pop();
 			this._sceneStack.Push(item);
@@ -429,67 +503,62 @@ public partial class SuperSceneManager : Node
 	/// When popping a scene without passing a return value, any tasks that are waiting for the scene to be popped with
 	/// a return value will be faulted with an exception.
 	/// </summary>
-	public async void PopScene()
+	public async Task PopScene()
 	{
-		SceneHistoryItem item = this._sceneStack.Pop();
-		if (this._sceneStack.Count == 0) {
-			this.Quit();
-			return;
+		SceneHistoryItem item = await this._PopScene();
+		if (item.TaskCompletionSource != null) {
+			item.TaskCompletionSource?.SetException(new Exception("Scene popped without a return value."));
 		}
-		try {
-			await this.ReturnToPreviousScene(item);
-		} catch {
-			this._sceneStack.Push(item);
-			throw;
-		}
-		Callable.From(() => {
-				item.TaskCompletionSource?.SetException(new Exception("Scene popped without a return value."));
-			})
-			.CallDeferred();
 	}
 
 	/// <summary>
 	/// Pop scene with an error. If the previous scene is waiting for a return, the Task will be faulted with the
 	/// provided exception. Otherwise, the exception will be logged and the scene will be popped.
 	/// </summary>
-	public async void PopScene(Exception e)
+	public async Task PopScene(Exception exception)
 	{
-		SceneHistoryItem item = this._sceneStack.Pop();
-		if (this._sceneStack.Count == 0) {
-			this.Quit();
-			return;
+		SceneHistoryItem item = await this._PopScene();
+		if (item.TaskCompletionSource != null) {
+			item.TaskCompletionSource.SetException(exception);
+		} else {
+			this.Logger.Error("❌ Scene popped with an exception and previous scene was not waiting for a return value.", new { item.SceneName, exception });
 		}
-		try {
-			await this.ReturnToPreviousScene(item);
-		} catch {
-			this._sceneStack.Push(item);
-			throw;
-		}
-		Callable.From(() => {
-				GD.PrintErr(nameof(SuperSceneManager), "❌ Scene popped with an error.", e);
-				item.TaskCompletionSource?.SetException(e);
-			})
-			.CallDeferred();
 	}
 
-    /// <summary>
-    /// When popping a scene, a value can be passed back to the scene that pushed it into the stack. This return
-    /// value should contain any resulting data that have been generated by the scene that is being popped.
-    /// </summary>
-    public async Task PopScene(Variant returnValue = new Variant())
+	/// <summary>
+	/// When popping a scene, a value can be passed back to the scene that pushed it into the stack. This return
+	/// value should contain any resulting data that have been generated by the scene that is being popped.
+	/// </summary>
+	public async Task PopScene(Variant returnValue = new Variant())
+	{
+		SceneHistoryItem item = await this._PopScene();
+		item.TaskCompletionSource?.SetResult(returnValue);
+	}
+
+	public async Task<SceneHistoryItem> _PopScene()
 	{
 		SceneHistoryItem item = this._sceneStack.Pop();
+
 		if (this._sceneStack.Count == 0) {
 			this.Quit();
-			return;
+			return item;
 		}
+
 		try {
 			await this.ReturnToPreviousScene(item);
 		} catch {
 			this._sceneStack.Push(item);
 			throw;
 		}
-		Callable.From(() => item.TaskCompletionSource?.SetResult(returnValue)).CallDeferred();
+
+		{
+			// Wait next frame
+			TaskCompletionSource source = new();
+			Callable.From(source.SetResult).CallDeferred();
+			await source.Task;
+		}
+
+		return item;
 	}
 
 	public void ResetScene() => this.ReplaceScene(this._sceneStack.Peek().SceneName, this._sceneStack.Peek().Options.Args);
@@ -497,7 +566,7 @@ public partial class SuperSceneManager : Node
 	public async void Quit()
 	{
 		try {
-			await this.ExitCurrentScene(ExitModeEnum.Delete);
+			await this.ExitCurrentScene(SceneExitStrategyEnum.Delete);
 		} catch {}
 		this.GetTree().Quit();
 	}

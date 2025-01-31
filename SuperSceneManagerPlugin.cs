@@ -9,17 +9,17 @@ public partial class SuperSceneManagerPlugin : EditorPlugin
 {
     public override void _EnterTree()
     {
-        this.AddAutoloadSingleton(nameof(SuperSceneManager), $"res://addons/{nameof(SuperSceneManager)}/{nameof(SuperSceneManager)}/{nameof(SuperSceneManager)}.cs");
+        this.AddAutoloadSingleton(nameof(SceneManager), $"res://addons/{nameof(SceneManager)}/{nameof(SceneManager)}/{nameof(SceneManager)}.cs");
 
         ProjectSettings.AddPropertyInfo(new() {
-            { "name", SuperSceneManager.SETTING_TRANSITION_SCENE },
+            { "name", SceneManager.SETTING_TRANSITION_SCENE },
             { "type", (long) Variant.Type.String },
             { "hint", (long) PropertyHint.File },
             { "hint_string", "*.tscn" },
         });
 
-        if (!ProjectSettings.HasSetting(SuperSceneManager.SETTING_TRANSITION_SCENE)) {
-            ProjectSettings.SetSetting(SuperSceneManager.SETTING_TRANSITION_SCENE, "");
+        if (!ProjectSettings.HasSetting(SceneManager.SETTING_TRANSITION_SCENE)) {
+            ProjectSettings.SetSetting(SceneManager.SETTING_TRANSITION_SCENE, "");
         }
 
         // ProjectSettings.AddPropertyInfo(new() {
@@ -30,18 +30,18 @@ public partial class SuperSceneManagerPlugin : EditorPlugin
         // });
 
         ProjectSettings.AddPropertyInfo(new() {
-            { "name", SuperSceneManager.SETTING_SCENE_LIST },
+            { "name", SceneManager.SETTING_SCENE_LIST },
             { "type", (long) Variant.Type.Dictionary },
             // { "hint", (long) PropertyHint.None },
             // { "hint_string", "string,string" },
         });
 
-        if (!ProjectSettings.HasSetting(SuperSceneManager.SETTING_SCENE_LIST)) {
+        if (!ProjectSettings.HasSetting(SceneManager.SETTING_SCENE_LIST)) {
             Godot.Collections.Dictionary sceneList = new();
             if (ProjectSettings.HasSetting("application/run/main_scene")) {
                 sceneList["main"] = ProjectSettings.GetSetting("application/run/main_scene").AsString();
             }
-            ProjectSettings.SetSetting(SuperSceneManager.SETTING_SCENE_LIST, sceneList);
+            ProjectSettings.SetSetting(SceneManager.SETTING_SCENE_LIST, sceneList);
         }
 
         ProjectSettings.Save();
