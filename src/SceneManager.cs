@@ -1,9 +1,8 @@
-#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Godot;
-using Raele.CSLogger;
+using Raele.GodotUtils.Extensions;
 
 namespace Raele.SuperSceneManager;
 
@@ -13,15 +12,9 @@ public partial class SceneManager : Node
 	// STATICS
 	// -----------------------------------------------------------------------------------------------------------------
 
-	public const string SETTING_SCENE_LIST = "addons/super_scene_manager/scene_list";
-	public const string SETTING_TRANSITION_SCENE = "addons/super_scene_manager/transition_scene";
-	// public const string SETTING_EXITING_SCENE_BEHAVIOR = "addons/super_scene_manager/exiting_scene_behavior";
-	// public const string SETTING_ENTERING_SCENE_BEHAVIOR = "addons/super_scene_manager/entering_scene_behavior";
-	public const string INITIAL_SCENE = "__initial_scene__";
-
-	public static SceneManager Instance { get; private set; } = null!;
-	private static readonly IReadOnlyDictionary<string, string> AllRegisteredScenes
-		= ProjectSettings.GetSetting(SETTING_SCENE_LIST).AsGodotDictionary<string, string>();
+	public static SceneManager Singleton => Engine.GetSceneTree().Root.GetNode<SceneManager>(nameof(SceneManager));
+	private static readonly Godot.Collections.Dictionary<string, string> SceneDict
+		= ProjectSettings.GetSetting(Consts.SettingNames.SceneList).AsGodotDictionary<string, string>();
 
 	// -----------------------------------------------------------------------------------------------------------------
 	// EXPORTS
@@ -34,16 +27,15 @@ public partial class SceneManager : Node
 	// -----------------------------------------------------------------------------------------------------------------
 
 	public bool TransitionInProgress { get; private set; } = false;
-	private Stack<SceneHistoryItem> _sceneStack = new();
+	private Stack<HistoryItem> _sceneStack = new();
 	private TaskCompletionSource? TransitionPauseController;
-	private Logger Logger = new Logger(nameof(SuperSceneManager));
 
 	// -----------------------------------------------------------------------------------------------------------------
 	// PROPERTIES
 	// -----------------------------------------------------------------------------------------------------------------
 
-	public IReadOnlyList<SceneHistoryItem> GetHistory() => this._sceneStack.ToArray();
-	public SceneHistoryItem PeekHistory() => this._sceneStack.Peek();
+	public IReadOnlyList<HistoryItem> GetHistory() => this._sceneStack.ToArray();
+	public HistoryItem PeekHistory() => this._sceneStack.Peek();
 
 	// -----------------------------------------------------------------------------------------------------------------
 	// SIGNALS
@@ -206,26 +198,11 @@ public partial class SceneManager : Node
 	// GODOT EVENTS
 	// -----------------------------------------------------------------------------------------------------------------
 
-	public override void _EnterTree()
-	{
-		if (Instance != null) {
-			this.Logger.Error("Instance already exists, ignoring autoload request.");
-			this.QueueFree();
-			return;
-		}
-		Instance = this;
-		this._sceneStack.Push(new() { SceneName = INITIAL_SCENE });
-	}
-	public override void _ExitTree()
-	{
-		if (Instance == this) {
-			Instance = null!;
-		}
-	}
-
 	public override void _Ready()
 	{
 		base._Ready();
+		Callable.From(() => SceneDict[Consts.InitialSceneName] = this.GetTree().Root.SceneFilePath).CallDeferred();
+		this._sceneStack.Push(new() { SceneName = Consts.InitialSceneName });
 		this.SetupTransitionScene();
 	}
 
@@ -252,9 +229,8 @@ public partial class SceneManager : Node
 	/// </summary>
 	private void SetupTransitionScene()
 	{
-		if (!GodotUtil.TryGetSetting(SETTING_TRANSITION_SCENE, out string transitionScenePath) || string.IsNullOrEmpty(transitionScenePath)) {
+		if (!ProjectSettings.TryGetSetting(Consts.SettingNames.TransitionScenePath, out string? transitionScenePath) || string.IsNullOrEmpty(transitionScenePath))
 			return;
-		}
 		PackedScene transitionScene = ResourceLoader.Load<PackedScene>(transitionScenePath, nameof(PackedScene));
 		this.AddChild(transitionScene.Instantiate());
 	}
@@ -265,13 +241,13 @@ public partial class SceneManager : Node
 
 	public static string GetScenePath(string sceneName)
 	{
-		if (sceneName == INITIAL_SCENE) {
+		if (sceneName == Consts.InitialSceneName) {
 			return ProjectSettings.GetSetting("application/run/main_scene").AsString();
 		}
-		if (!AllRegisteredScenes.ContainsKey(sceneName)) {
+		if (!SceneDict.ContainsKey(sceneName)) {
 			throw new System.Exception($"SuperSceneManager: Scene not found in project settings: {sceneName}");
 		}
-		if (AllRegisteredScenes[sceneName] is not string scenePath) {
+		if (SceneDict[sceneName] is not string scenePath) {
 			throw new System.Exception($"SuperSceneManager: Invalid path for scene: {sceneName}");
 		}
 		if (!ResourceLoader.Exists(scenePath)) {
@@ -286,7 +262,7 @@ public partial class SceneManager : Node
 		this.GetTree().ChangeSceneToFile(scenePath);
 	}
 
-	private async Task ReturnToPreviousScene(SceneHistoryItem item)
+	private async Task ReturnToPreviousScene(HistoryItem item)
 	{
 		await this.ExitCurrentScene(SceneExitStrategyEnum.Delete);
 
@@ -422,9 +398,9 @@ public partial class SceneManager : Node
 	// SCENE NAVIGATION METHODS
 	// -----------------------------------------------------------------------------------------------------------------
 
-	private SceneHistoryItem PushHistoryItem(string sceneName, SceneChangeOptions options, bool hasTask = false)
+	private HistoryItem PushHistoryItem(string sceneName, SceneChangeOptions options, bool hasTask = false)
 	{
-		SceneHistoryItem item = new() {
+		HistoryItem item = new() {
 			SceneName = sceneName,
 			Options = options,
 			PreviousSceneInstance = options.ExitStrategy != SceneExitStrategyEnum.Delete
@@ -470,9 +446,9 @@ public partial class SceneManager : Node
 			ExitStrategy = SceneExitStrategyEnum.HideAndDisable,
 		};
 		if (options.ExitStrategy == SceneExitStrategyEnum.Delete) {
-			this.Logger.Warn("Pushing a scene with return value using ExitStrategy.Delete. This is not recommended as it might cause issues since the node will be deleted from the engine but corresponding Godot.GodotObject objects refered by the stack awaiting the Task will be invalidated but not collected collected by GC.");
+			GD.PushWarning("Pushing a scene with return value using ExitStrategy.Delete. This is not recommended as it might cause issues since the node will be deleted from the engine but corresponding Godot.GodotObject objects refered by the stack awaiting the Task will be invalidated but not collected collected by GC.");
 		}
-		SceneHistoryItem item = this.PushHistoryItem(sceneName, options, hasTask: true);
+		HistoryItem item = this.PushHistoryItem(sceneName, options, hasTask: true);
 		try {
 			await this.ChangeSceneAsync(sceneName, options);
 		} catch {
@@ -487,7 +463,7 @@ public partial class SceneManager : Node
 		=> this.ReplaceScene(sceneName, new SceneChangeOptions() { Args = args });
 	public async void ReplaceScene(string sceneName, SceneChangeOptions options)
 	{
-		SceneHistoryItem item = this._sceneStack.Pop();
+		HistoryItem item = this._sceneStack.Pop();
 		item.TaskCompletionSource?.SetException(new Exception("Scene was replaced."));
 		this.PushHistoryItem(sceneName, options);
 		try {
@@ -505,7 +481,7 @@ public partial class SceneManager : Node
 	/// </summary>
 	public async Task PopScene()
 	{
-		SceneHistoryItem item = await this._PopScene();
+		HistoryItem item = await this._PopScene();
 		if (item.TaskCompletionSource != null) {
 			item.TaskCompletionSource?.SetException(new Exception("Scene popped without a return value."));
 		}
@@ -517,11 +493,11 @@ public partial class SceneManager : Node
 	/// </summary>
 	public async Task PopScene(Exception exception)
 	{
-		SceneHistoryItem item = await this._PopScene();
+		HistoryItem item = await this._PopScene();
 		if (item.TaskCompletionSource != null) {
 			item.TaskCompletionSource.SetException(exception);
 		} else {
-			this.Logger.Error("❌ Scene popped with an exception and previous scene was not waiting for a return value.", new { item.SceneName, exception });
+			GD.PushError("❌ Scene popped with an exception and previous scene was not waiting for a return value.");
 		}
 	}
 
@@ -531,13 +507,13 @@ public partial class SceneManager : Node
 	/// </summary>
 	public async Task PopScene(Variant returnValue = new Variant())
 	{
-		SceneHistoryItem item = await this._PopScene();
+		HistoryItem item = await this._PopScene();
 		item.TaskCompletionSource?.SetResult(returnValue);
 	}
 
-	public async Task<SceneHistoryItem> _PopScene()
+	public async Task<HistoryItem> _PopScene()
 	{
-		SceneHistoryItem item = this._sceneStack.Pop();
+		HistoryItem item = this._sceneStack.Pop();
 
 		if (this._sceneStack.Count == 0) {
 			this.Quit();

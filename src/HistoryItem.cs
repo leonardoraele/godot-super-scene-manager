@@ -6,7 +6,7 @@ using static Raele.SuperSceneManager.SceneManager;
 
 namespace Raele.SuperSceneManager;
 
-public record SceneHistoryItem
+public record HistoryItem
 {
 	/// <summary>
 	/// A unique identifier for this scene history item.
