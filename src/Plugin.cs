@@ -5,10 +5,11 @@ using Raele.GodotUtils.Extensions;
 namespace Raele.SuperSceneManager;
 
 [Tool]
-public partial class SuperSceneManagerPlugin : EditorPlugin
+public partial class Plugin : EditorPlugin
 {
 	public override void _EnterTree()
 	{
+		base._EnterTree();
 		ProjectSettings.DefineSetting(new()
 		{
 			Name = Consts.SettingNames.SceneList,
@@ -30,7 +31,13 @@ public partial class SuperSceneManagerPlugin : EditorPlugin
 			DefaultValue = "",
 		});
 
-		this.AddAutoloadSingleton(nameof(SceneManager), $"res://addons/{nameof(SceneManager)}/{nameof(SceneManager)}/{nameof(SceneManager)}.cs");
+		this.AddAutoloadSingleton(nameof(SceneManager), $"res://addons/{nameof(SuperSceneManager)}/src/{nameof(SceneManager)}.cs");
+	}
+
+	public override void _ExitTree()
+	{
+		base._ExitTree();
+		this.RemoveAutoloadSingleton(nameof(SceneManager));
 	}
 }
 #endif
