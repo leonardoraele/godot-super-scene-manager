@@ -13,7 +13,8 @@ public partial class SceneManager : Node
 	// STATICS
 	//==================================================================================================================
 
-	public static SceneManager Singleton => Engine.GetSceneTree().Root.GetNode<SceneManager>(nameof(SceneManager));
+	public static SceneManager Singleton
+		=> field ??= Engine.GetSceneTree().Root.GetNode<SceneManager>(nameof(SceneManager));
 	private static readonly Godot.Collections.Dictionary<string, string> SceneDict
 		= ProjectSettings.GetSetting(Consts.SettingNames.SceneList).AsGodotDictionary<string, string>();
 
@@ -22,7 +23,7 @@ public partial class SceneManager : Node
 	//==================================================================================================================
 
 	public bool TransitionInProgress { get; private set; } = false;
-	private Stack<HistoryItem> _sceneStack = new();
+	private Stack<HistoryItem> SceneHistory = new();
 	private TaskCompletionSource? TransitionPauseController;
 	public string MainScenePath { get; private set; } = "";
 	public string MainSceneName { get; private set; } = "";
@@ -31,8 +32,8 @@ public partial class SceneManager : Node
 	// COMPUTED PROPERTIES
 	//==================================================================================================================
 
-	public IReadOnlyList<HistoryItem> GetHistory() => this._sceneStack.ToArray();
-	public HistoryItem PeekHistory() => this._sceneStack.Peek();
+	public IReadOnlyList<HistoryItem> GetHistory() => this.SceneHistory.ToArray();
+	public HistoryItem PeekHistory() => this.SceneHistory.Peek();
 
 	//==================================================================================================================
 	// SIGNALS
@@ -73,9 +74,9 @@ public partial class SceneManager : Node
 		/// </summary>
 		Delete,
 		/// <summary>
-		/// The old scene is removed from the tree, but is not deleted. When this scene returns to the top of the stack, it
-		/// will be added immediately to the tree again, no loading needed, and it will be in the same state as it was when
-		/// it was popped.
+		/// The old scene is removed from the tree, but is not deleted. When this scene returns to the top of the stack,
+		/// it will be added immediately to the tree again, no loading needed, and it will be in the same state as it
+		/// was when it was popped.
 		/// </summary>
 		Detach,
 		/// <summary>
@@ -84,8 +85,8 @@ public partial class SceneManager : Node
 		/// </summary>
 		HideAndDisable,
 		/// <summary>
-		/// The old scene is kept in the tree but its visibility is set to false. Only works if the top node of the scene is
-		/// a Node2D or Control.
+		/// The old scene is kept in the tree but its visibility is set to false. Only works if the top node of the
+		/// scene is a CanvasItem (e.g. Node2D or Control) or Node3D.
 		/// </summary>
 		Hide,
 		/// <summary>
@@ -199,8 +200,9 @@ public partial class SceneManager : Node
 	{
 		base._Ready();
 		this.MainScenePath = ProjectSettings.GetSetting("application/run/main_scene").AsString();
-		this.MainSceneName = SceneDict.First(kv => kv.Value == this.MainScenePath).Key;
-		this._sceneStack.Push(new() { SceneName = this.MainSceneName });
+		this.MainSceneName = SceneDict.FirstOrDefault(kv => kv.Value == this.MainScenePath).Key
+			?? throw new Exception($"{nameof(SuperSceneManager)}: Main scene not found in scene list project setting.");
+		this.SceneHistory.Push(new() { SceneName = this.MainSceneName });
 		this.SetupTransitionScene();
 	}
 
@@ -274,7 +276,8 @@ public partial class SceneManager : Node
 	private Task<Node> ChangeSceneAsync(string sceneName, SceneChangeOptions? options = null)
 		=> this.ChangeSceneAsync<Node>(sceneName, options ?? default);
 
-	private async Task<T> ChangeSceneAsync<T>(string sceneName, SceneChangeOptions? options = null) where T : Node {
+	private async Task<T> ChangeSceneAsync<T>(string sceneName, SceneChangeOptions? options = null) where T : Node
+	{
 		if (this.TransitionInProgress) {
 			throw new Exception("SuperSceneManager: Transition already in progress.");
 		}
@@ -286,7 +289,9 @@ public partial class SceneManager : Node
 		}
 	}
 
-	private async Task<T> PerformSceneChangeAsync<T>(string sceneName, SceneChangeOptions? options = null) where T : Node {
+
+	private async Task<T> PerformSceneChangeAsync<T>(string sceneName, SceneChangeOptions? options = null) where T : Node
+	{
 		options ??= new();
 
 		// Validate next scene
@@ -296,14 +301,19 @@ public partial class SceneManager : Node
 		await this.ExitCurrentScene(options.ExitStrategy);
 
 		// Load next scene
-		PackedScene scene = await ResourceLoadingUtil.LoadSceneAsync(
-			scenePath,
-			progress => this.EmitSignal(SignalName.SceneLoadProgress, progress, sceneName, this.PeekHistory().SceneName)
-		);
-		Node node = scene.Instantiate();
-		if (scene.Instantiate() is not T instance) {
-			node.Free();
-			throw new Exception($"SuperSceneManager: Scene [{sceneName}] is not of type {typeof(T).Name}");
+		T instance;
+		{
+			PackedScene scene = await ResourceLoadingUtil.LoadSceneAsync(
+				scenePath,
+				progress => this.EmitSignal(SignalName.SceneLoadProgress, progress, sceneName, this.PeekHistory().SceneName)
+			);
+			Node node = scene.Instantiate();
+			if (node is not T tNode)
+			{
+				node.Free();
+				throw new Exception($"SuperSceneManager: Scene [{sceneName}] is not of type {typeof(T).Name}");
+			}
+			instance = tNode;
 		}
 
 		// Before entering next scene
@@ -394,7 +404,7 @@ public partial class SceneManager : Node
 				: ProcessModeEnum.Inherit,
 			TaskCompletionSource = hasTask ? new() : null,
 		};
-		this._sceneStack.Push(item);
+		this.SceneHistory.Push(item);
 		return item;
 	}
 
@@ -406,7 +416,7 @@ public partial class SceneManager : Node
 		try {
 			await this.ChangeSceneAsync(sceneName, options);
 		} catch {
-			this._sceneStack.Pop();
+			this.SceneHistory.Pop();
 			throw;
 		}
 	}
@@ -435,7 +445,7 @@ public partial class SceneManager : Node
 		try {
 			await this.ChangeSceneAsync(sceneName, options);
 		} catch {
-			this._sceneStack.Pop();
+			this.SceneHistory.Pop();
 			item.TaskCompletionSource!.SetException(new Exception("Scene change failed."));
 			throw;
 		}
@@ -446,14 +456,14 @@ public partial class SceneManager : Node
 		=> this.ReplaceScene(sceneName, new SceneChangeOptions() { Args = args });
 	public async void ReplaceScene(string sceneName, SceneChangeOptions options)
 	{
-		HistoryItem item = this._sceneStack.Pop();
+		HistoryItem item = this.SceneHistory.Pop();
 		item.TaskCompletionSource?.SetException(new Exception("Scene was replaced."));
 		this.PushHistoryItem(sceneName, options);
 		try {
 			await this.ChangeSceneAsync(sceneName, options);
 		} catch {
-			this._sceneStack.Pop();
-			this._sceneStack.Push(item);
+			this.SceneHistory.Pop();
+			this.SceneHistory.Push(item);
 			throw;
 		}
 	}
@@ -496,9 +506,9 @@ public partial class SceneManager : Node
 
 	public async Task<HistoryItem> _PopScene()
 	{
-		HistoryItem item = this._sceneStack.Pop();
+		HistoryItem item = this.SceneHistory.Pop();
 
-		if (this._sceneStack.Count == 0) {
+		if (this.SceneHistory.Count == 0) {
 			this.Quit();
 			return item;
 		}
@@ -506,7 +516,7 @@ public partial class SceneManager : Node
 		try {
 			await this.ReturnToPreviousScene(item);
 		} catch {
-			this._sceneStack.Push(item);
+			this.SceneHistory.Push(item);
 			throw;
 		}
 
@@ -520,7 +530,7 @@ public partial class SceneManager : Node
 		return item;
 	}
 
-	public void ResetScene() => this.ReplaceScene(this._sceneStack.Peek().SceneName, this._sceneStack.Peek().Options.Args);
+	public void ResetScene() => this.ReplaceScene(this.SceneHistory.Peek().SceneName, this.SceneHistory.Peek().Options.Args);
 
 	public async void Quit()
 	{
