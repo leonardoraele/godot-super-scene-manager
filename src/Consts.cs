@@ -10,6 +10,4 @@ public static class Consts
 		// public const string SETTING_EXITING_SCENE_BEHAVIOR = PREFIX + "exiting_scene_behavior";
 		// public const string SETTING_ENTERING_SCENE_BEHAVIOR = PREFIX + "entering_scene_behavior";
 	}
-
-	public const string InitialSceneName = "_main_scene";
 }

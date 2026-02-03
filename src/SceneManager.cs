@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Godot;
 using Raele.GodotUtils.Extensions;
@@ -8,38 +9,34 @@ namespace Raele.SuperSceneManager;
 
 public partial class SceneManager : Node
 {
-	// -----------------------------------------------------------------------------------------------------------------
+	//==================================================================================================================
 	// STATICS
-	// -----------------------------------------------------------------------------------------------------------------
+	//==================================================================================================================
 
 	public static SceneManager Singleton => Engine.GetSceneTree().Root.GetNode<SceneManager>(nameof(SceneManager));
 	private static readonly Godot.Collections.Dictionary<string, string> SceneDict
 		= ProjectSettings.GetSetting(Consts.SettingNames.SceneList).AsGodotDictionary<string, string>();
 
-	// -----------------------------------------------------------------------------------------------------------------
-	// EXPORTS
-	// -----------------------------------------------------------------------------------------------------------------
-
-	// [Export] public
-
-	// -----------------------------------------------------------------------------------------------------------------
+	//==================================================================================================================
 	// FIELDS
-	// -----------------------------------------------------------------------------------------------------------------
+	//==================================================================================================================
 
 	public bool TransitionInProgress { get; private set; } = false;
 	private Stack<HistoryItem> _sceneStack = new();
 	private TaskCompletionSource? TransitionPauseController;
+	public string MainScenePath { get; private set; } = "";
+	public string MainSceneName { get; private set; } = "";
 
-	// -----------------------------------------------------------------------------------------------------------------
-	// PROPERTIES
-	// -----------------------------------------------------------------------------------------------------------------
+	//==================================================================================================================
+	// COMPUTED PROPERTIES
+	//==================================================================================================================
 
 	public IReadOnlyList<HistoryItem> GetHistory() => this._sceneStack.ToArray();
 	public HistoryItem PeekHistory() => this._sceneStack.Peek();
 
-	// -----------------------------------------------------------------------------------------------------------------
+	//==================================================================================================================
 	// SIGNALS
-	// -----------------------------------------------------------------------------------------------------------------
+	//==================================================================================================================
 
 	[Signal] public delegate void BeforeSceneExitEventHandler(Node scene);
 	[Signal] public delegate void AfterSceneExitEventHandler();
@@ -47,9 +44,9 @@ public partial class SceneManager : Node
 	[Signal] public delegate void BeforeSceneEnterEventHandler(string sceneName, Node scene, Godot.Collections.Array @params);
 	[Signal] public delegate void AfterSceneEnterEventHandler(string sceneName, Node scene, Godot.Collections.Array @params);
 
-	// -----------------------------------------------------------------------------------------------------------------
+	//==================================================================================================================
 	// INTERNAL TYPES
-	// -----------------------------------------------------------------------------------------------------------------
+	//==================================================================================================================
 
 	public record SceneChangeOptions {
 		public SceneExitStrategyEnum ExitStrategy = SceneExitStrategyEnum.Delete;
@@ -194,38 +191,27 @@ public partial class SceneManager : Node
 	// 	SingleInStack,
 	// }
 
-	// -----------------------------------------------------------------------------------------------------------------
-	// GODOT EVENTS
-	// -----------------------------------------------------------------------------------------------------------------
+	//==================================================================================================================
+	// OVERRIDES
+	//==================================================================================================================
 
 	public override void _Ready()
 	{
 		base._Ready();
-		Callable.From(() => SceneDict[Consts.InitialSceneName] = this.GetTree().Root.SceneFilePath).CallDeferred();
-		this._sceneStack.Push(new() { SceneName = Consts.InitialSceneName });
+		this.MainScenePath = ProjectSettings.GetSetting("application/run/main_scene").AsString();
+		this.MainSceneName = SceneDict.First(kv => kv.Value == this.MainScenePath).Key;
+		this._sceneStack.Push(new() { SceneName = this.MainSceneName });
 		this.SetupTransitionScene();
 	}
 
-	// public override void _Process(double delta)
-	// {
-	// 	base._Process(delta);
-	// }
-
-	// public override void _PhysicsProcess(double delta)
-	// {
-	// 	base._PhysicsProcess(delta);
-	// }
-
-	// public override string[] _GetConfigurationWarnings()
-	// 	=> base._PhysicsProcess(delta);
-
-	// -----------------------------------------------------------------------------------------------------------------
+	//==================================================================================================================
 	// SETUP METHODS
-	// -----------------------------------------------------------------------------------------------------------------
+	//==================================================================================================================
 
 	/// <summary>
-	/// Loads the scene defined by the developer in the settings. This scene will be used when transitioning between
-	/// scenes. This is useful as a loading screen.
+	/// Loads the scene defined in the TransitionScene project setting.
+	///
+	/// This scene will be used when transitioning between scenes. This is useful as a loading screen.
 	/// </summary>
 	private void SetupTransitionScene()
 	{
@@ -235,30 +221,27 @@ public partial class SceneManager : Node
 		this.AddChild(transitionScene.Instantiate());
 	}
 
-	// -----------------------------------------------------------------------------------------------------------------
-	// SCENE LOANDING & CHANGING METHODS
-	// -----------------------------------------------------------------------------------------------------------------
+	//==================================================================================================================
+	// SCENE LOADING & CHANGING METHODS
+	//==================================================================================================================
 
 	public static string GetScenePath(string sceneName)
 	{
-		if (sceneName == Consts.InitialSceneName) {
-			return ProjectSettings.GetSetting("application/run/main_scene").AsString();
-		}
 		if (!SceneDict.ContainsKey(sceneName)) {
-			throw new System.Exception($"SuperSceneManager: Scene not found in project settings: {sceneName}");
+			throw new Exception($"SuperSceneManager: Scene not found in project settings: {sceneName}");
 		}
 		if (SceneDict[sceneName] is not string scenePath) {
-			throw new System.Exception($"SuperSceneManager: Invalid path for scene: {sceneName}");
+			throw new Exception($"SuperSceneManager: Invalid path for scene: {sceneName}");
 		}
 		if (!ResourceLoader.Exists(scenePath)) {
-			throw new System.Exception($"SuperSceneManager: Scene not found in file system: [{sceneName}] {scenePath}");
+			throw new Exception($"SuperSceneManager: Scene not found in file system: [{sceneName}] {scenePath}");
 		}
 		return scenePath;
 	}
 
 	private void ChangeSceneSync(string sceneName)
 	{
-		string scenePath = SceneManager.GetScenePath(sceneName);
+		string scenePath = GetScenePath(sceneName);
 		this.GetTree().ChangeSceneToFile(scenePath);
 	}
 
@@ -307,7 +290,7 @@ public partial class SceneManager : Node
 		options ??= new();
 
 		// Validate next scene
-		string scenePath = SceneManager.GetScenePath(sceneName);
+		string scenePath = GetScenePath(sceneName);
 
 		// Exit current scene
 		await this.ExitCurrentScene(options.ExitStrategy);
@@ -394,9 +377,9 @@ public partial class SceneManager : Node
 		this.TransitionPauseController = null;
 	}
 
-	// -----------------------------------------------------------------------------------------------------------------
+	//==================================================================================================================
 	// SCENE NAVIGATION METHODS
-	// -----------------------------------------------------------------------------------------------------------------
+	//==================================================================================================================
 
 	private HistoryItem PushHistoryItem(string sceneName, SceneChangeOptions options, bool hasTask = false)
 	{

@@ -10,16 +10,14 @@ public partial class Plugin : EditorPlugin
 	public override void _EnterTree()
 	{
 		base._EnterTree();
+
 		ProjectSettings.DefineSetting(new()
 		{
 			Name = Consts.SettingNames.SceneList,
 			Type = Variant.Type.Dictionary,
 			Hint = PropertyHint.DictionaryType,
-			HintString = $"String,String/{PropertyHint.File:D}:*.tscn",
-			DefaultValue = new Godot.Collections.Dictionary()
-			{
-				{ Consts.InitialSceneName, ProjectSettings.GetSetting("application/run/main_scene").AsString() }
-			},
+			HintString = $"String;String/{(int)PropertyHint.File}:*.tscn",
+			DefaultValue = new Godot.Collections.Dictionary<string, string>(),
 		});
 
 		ProjectSettings.DefineSetting(new()
